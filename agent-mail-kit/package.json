@@ -1,0 +1,29 @@
+{
+  "name": "agent-mail-kit",
+  "version": "1.0.0",
+  "description": "AI Agent Email Skill - Send and manage email with identity tagging, templates, and logging",
+  "main": "scripts/smtp.js",
+  "scripts": {
+    "check": "node scripts/imap.js check",
+    "fetch": "node scripts/imap.js fetch",
+    "search": "node scripts/imap.js search"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "imap": "^0.8.19",
+    "imap-simple": "^5.1.0",
+    "mailparser": "^3.9.3",
+    "nodemailer": "^7.0.13"
+  },
+  "keywords": [
+    "email",
+    "mail",
+    "agent",
+    "smtp",
+    "template",
+    "skill",
+    "openclaw"
+  ],
+  "author": "OpenClaw",
+  "license": "MIT"
+}
