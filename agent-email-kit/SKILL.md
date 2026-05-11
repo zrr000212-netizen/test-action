@@ -1,5 +1,5 @@
 ---
-name: agent-mail-kit
+name: agent-email-kit
 description: Send and manage email with AI agents. Supports identity tagging (agent/channel/session), Markdown templates with auto HTML rendering, variable substitution, multi-account, and send logging. Use when sending reports, notifications, proposals, or any email from an AI agent to users.
 compatibility: Requires Node.js 16+ and npm. Works with any IMAP/SMTP server (Gmail, Outlook, 163.com, QQ Mail, enterprise email). Identity config at ~/.agents-shared/config/email-identity.json
 metadata:
