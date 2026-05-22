@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Skill Targeted Audit — skillcheck + markdownlint-cli2 + cisco-ai-skill-scanner"""
+"""Skill Targeted Audit — skillcheck + markdownlint-cli2 + cisco-ai-skill-scanner + gitleaks"""
 
 import argparse
 import json
@@ -25,6 +25,7 @@ def parse_args():
     p.add_argument("--skillcheck", default="skillcheck", help="skillcheck binary path")
     p.add_argument("--markdownlint", default="markdownlint-cli2", help="markdownlint-cli2 binary path")
     p.add_argument("--skill-scanner", default="skill-scanner", help="skill-scanner binary path")
+    p.add_argument("--gitleaks", default="gitleaks", help="gitleaks binary path")
     p.add_argument("--node-bin", default="", help="Node bin dir for npx (e.g. /opt/nvm/versions/node/v18.20.8/bin)")
     p.add_argument("--no-install", action="store_true", help="Skip auto-install of tools")
     return p.parse_args()
@@ -44,6 +45,10 @@ def ensure_tools(no_install=False):
     if not shutil.which("markdownlint-cli2"):
         print("  Auto-installing markdownlint-cli2 ...", flush=True)
         subprocess.run(["npm", "install", "-g", "markdownlint-cli2"], check=False)
+    # gitleaks (download binary)
+    if not shutil.which("gitleaks"):
+        print("  Auto-installing gitleaks ...", flush=True)
+        _install_gitleaks()
 
 # ── Discover skills ──
 
@@ -106,6 +111,53 @@ def run_skill_scanner(skill_dir: Path, scanner_bin: str):
     except Exception:
         return {"raw_text": out, "parse_error": True}
 
+def _install_gitleaks():
+    """Download and install gitleaks binary."""
+    import platform, tempfile, tarfile
+    arch = "arm64" if platform.machine() in ("aarch64", "arm64") else "amd64"
+    version = "8.25.1"
+    filename = f"gitleaks_{version}_linux_{arch}.tar.gz"
+    mirrors = [
+        f"https://gh-proxy.com/https://github.com/gitleaks/gitleaks/releases/download/v{version}/{filename}",
+        f"https://gh.ddlc.top/https://github.com/gitleaks/gitleaks/releases/download/v{version}/{filename}",
+    ]
+    for url in mirrors:
+        try:
+            tmp = tempfile.mktemp(suffix=".tar.gz")
+            r = subprocess.run(["curl", "-fsSL", "-o", tmp, url, "--connect-timeout", "10", "-m", "120"],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                continue
+            with tarfile.open(tmp, "r:gz") as tf:
+                tf.extractall(path="/usr/local/bin")
+            os.unlink(tmp)
+            if shutil.which("gitleaks"):
+                print("  gitleaks installed successfully", flush=True)
+                return
+        except Exception:
+            continue
+    print("  WARNING: gitleaks auto-install failed; install manually from https://github.com/gitleaks/gitleaks/releases", flush=True)
+
+def run_gitleaks(skill_dir: Path, gitleaks_bin: str):
+    """Run gitleaks detect on a single skill dir (--no-git mode), return parsed JSON."""
+    # Use a temp file for JSON report to avoid stdout noise
+    import tempfile
+    report_file = tempfile.mktemp(suffix=".json")
+    cmd = [gitleaks_bin, "detect", "--source", str(skill_dir),
+           "--no-banner", "--no-git",
+           "--report-format", "json", "--report-path", report_file]
+    out, rc = run_cmd(cmd, timeout=30)
+    try:
+        with open(report_file, "r", encoding="utf-8") as f:
+            findings = json.load(f)
+        os.unlink(report_file)
+        return {"findings": findings, "leaks_found": len(findings) > 0}
+    except Exception:
+        # Clean up temp file if it exists
+        if os.path.exists(report_file):
+            os.unlink(report_file)
+        return {"findings": [], "leaks_found": False, "raw_text": out, "parse_error": True}
+
 # ── Parse markdownlint output ──
 
 def parse_markdownlint(raw: str):
@@ -145,6 +197,10 @@ FIX_STRATEGIES = {
     "credential_leak": "Replace hardcoded secrets with environment variable references (${VAR}); add to .secrets.baseline if false positive",
     "dangerous_function": "Wrap eval()/exec() calls with input validation; consider safer alternatives like ast.literal_eval()",
     "prompt_injection": "Review and sanitize user-controllable input before embedding in prompts; use structured input templates",
+    # gitleaks
+    "generic-api-key": "Replace hardcoded API key/secret with environment variable reference (${VAR} or os.environ.get()); add to .gitleaksignore if false positive",
+    "private-key": "Remove hardcoded private key; load from file or secret manager at runtime; add key file to .gitignore",
+    "gitleaks": "Replace hardcoded credential with environment variable or secret manager reference; see https://gitleaks.io/docs/secrets for rule-specific remediation",
     # 华为云规范
     "frontmatter": "检查 SKILL.md YAML frontmatter 格式：必需字段(name/description/tags/version)、类型正确、name与目录名一致",
     "section": "按华为云规范补充正文章节：概述、前置条件、核心命令、参数确认、参考文档为必需章节",
@@ -162,7 +218,7 @@ def get_fix_strategy(rule_or_category: str) -> str:
 
 # ── Build report ──
 
-def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, scanner_results, hwcloud_results=None):
+def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, scanner_results, hwcloud_results=None, gitleaks_results=None):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     L = []
     def a(s=""): L.append(s)
@@ -247,6 +303,31 @@ def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, 
                     warning_issues.append(issue)
                 # skip info
 
+    # gitleaks issues
+    gitleaks_pass = True
+    if gitleaks_results:
+        for gr in gitleaks_results:
+            skill_name = gr.get("skill_name", "")
+            for f in gr.get("findings", []):
+                # gitleaks finding fields: RuleID, File, StartLine, Secret, Match, Entropy, Description
+                rule_id = f.get("RuleID", "unknown")
+                fpath = f.get("File", "")
+                line = f.get("StartLine", 0)
+                secret = f.get("Secret", "")
+                match = f.get("Match", "")
+                desc = f.get("Description", rule_id)
+                # Truncate secret for display (never show full secret in report)
+                snippet = match[:80] + "..." if len(match) > 80 else match
+                issue = {
+                    "skill": skill_name, "source": "gitleaks", "rule": rule_id,
+                    "severity": "error", "category": rule_id,
+                    "message": desc, "line": line,
+                    "snippet": snippet, "rule_prefix": rule_id,
+                    "file": fpath,
+                }
+                error_issues.append(issue)
+                gitleaks_pass = False
+
     # ── Section 2: Issue Summary ──
     a("── 2. Issue Summary ──")
     a()
@@ -327,6 +408,7 @@ def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, 
         ("markdownlint", md_pass),
         ("skill-scanner", scanner_pass),
         ("hwcloud-spec", hwcloud_pass if hwcloud_results is not None else True),
+        ("gitleaks", gitleaks_pass if gitleaks_results is not None else True),
     ]
     pass_count = sum(1 for _, v in checks if v)
     total = len(checks)
@@ -362,18 +444,18 @@ def main():
     print(f"Scanning {len(skills)} skill(s) under {target} ...")
 
     # 1. skillcheck
-    print("  [1/4] skillcheck ...", end=" ", flush=True)
+    print("  [1/5] skillcheck ...", end=" ", flush=True)
     sc_data = run_skillcheck(target, args.skillcheck)
     print("done")
 
     # 2. markdownlint-cli2
-    print("  [2/4] markdownlint-cli2 ...", end=" ", flush=True)
+    print("  [2/5] markdownlint-cli2 ...", end=" ", flush=True)
     md_raw, md_rc = run_markdownlint(target, args.markdownlint, args.node_bin)
     md_issues = parse_markdownlint(md_raw)
     print(f"done ({len(md_issues)} issues)")
 
     # 3. skill-scanner (per skill)
-    print("  [3/4] skill-scanner ...", flush=True)
+    print("  [3/5] skill-scanner ...", flush=True)
     scanner_results = []
     for s in skills:
         print(f"    scanning {s.name} ...", end=" ", flush=True)
@@ -384,7 +466,7 @@ def main():
         scanner_results.append(sr)
 
     # 4. 华为云 SKILL.md 规范检查 (per skill)
-    print("  [4/4] 华为云规范检查 ...", flush=True)
+    print("  [4/5] 华为云规范检查 ...", flush=True)
     hwcloud_results = []
     for s in skills:
         print(f"    checking {s.name} ...", end=" ", flush=True)
@@ -393,8 +475,24 @@ def main():
         print(f"{'OK' if issue_count == 0 else f'{issue_count} issues'}")
         hwcloud_results.append(hr)
 
+    # 5. gitleaks 凭证扫描 (per skill)
+    print("  [5/5] gitleaks ...", flush=True)
+    gitleaks_results = []
+    gitleaks_bin = shutil.which(args.gitleaks) or args.gitleaks
+    if not shutil.which(args.gitleaks):
+        print("    SKIP (gitleaks not found, install: https://github.com/gitleaks/gitleaks/releases)")
+    else:
+        for s in skills:
+            print(f"    scanning {s.name} ...", end=" ", flush=True)
+            gr = run_gitleaks(s, gitleaks_bin)
+            gr["skill_name"] = s.name
+            leaks = gr.get("leaks_found", False)
+            finding_count = len(gr.get("findings", []))
+            print(f"{'CLEAN' if not leaks else f'{finding_count} LEAKS'}")
+            gitleaks_results.append(gr)
+
     # Build report
-    report = build_report(target, skills, sc_data, md_raw, md_rc, md_issues, scanner_results, hwcloud_results)
+    report = build_report(target, skills, sc_data, md_raw, md_rc, md_issues, scanner_results, hwcloud_results, gitleaks_results)
 
     # Write report
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
