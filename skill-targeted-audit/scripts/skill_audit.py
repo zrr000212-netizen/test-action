@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Skill Repository Quality Audit — skillcheck + markdownlint-cli2 + cisco-ai-skill-scanner"""
+"""Skill Targeted Audit — skillcheck + markdownlint-cli2 + cisco-ai-skill-scanner"""
 
 import argparse
 import json
@@ -12,6 +12,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# 导入华为云规范检查
+sys.path.insert(0, str(Path(__file__).parent))
+from hwcloud_spec_check import run_hwcloud_spec_check
+
 # ── CLI ──
 
 def parse_args():
@@ -22,72 +26,24 @@ def parse_args():
     p.add_argument("--markdownlint", default="markdownlint-cli2", help="markdownlint-cli2 binary path")
     p.add_argument("--skill-scanner", default="skill-scanner", help="skill-scanner binary path")
     p.add_argument("--node-bin", default="", help="Node bin dir for npx (e.g. /opt/nvm/versions/node/v18.20.8/bin)")
-    p.add_argument("--no-install", action="store_true", help="Skip auto-install of missing tools")
+    p.add_argument("--no-install", action="store_true", help="Skip auto-install of tools")
     return p.parse_args()
 
 # ── Auto-install ──
 
-def which(name):
-    return shutil.which(name)
-
-def ensure_python_tool(name, import_name=None):
-    """Ensure a Python CLI tool is available, install via pip if missing."""
-    if which(name):
-        return which(name)
-    print(f"  ⚙️ {name} not found, installing via pip ...", end=" ", flush=True)
-    out, rc = run_cmd([sys.executable, "-m", "pip", "install", name], timeout=120)
-    path = which(name)
-    if path and rc == 0:
-        print(f"ok → {path}")
-        return path
-    print(f"FAILED (exit {rc})")
-    return None
-
-def ensure_node_tool(name, node_bin=""):
-    """Ensure a Node CLI tool is available, install via npm -g if missing."""
-    full = os.path.join(node_bin, name) if node_bin else name
-    if which(full):
-        return full
-    npm = os.path.join(node_bin, "npm") if node_bin else "npm"
-    if not which(npm):
-        npm = "npm"
-    print(f"  ⚙️ {name} not found, installing via npm -g ...", end=" ", flush=True)
-    out, rc = run_cmd([npm, "install", "-g", name], timeout=120)
-    path = which(full) or which(name)
-    if path and rc == 0:
-        print(f"ok → {path}")
-        return path
-    print(f"FAILED (exit {rc})")
-    return None
-
-def ensure_tools(args):
-    """Auto-install missing tools. Returns (skillcheck_bin, markdownlint_bin, scanner_bin) or None on failure."""
-    sc_bin = args.skillcheck
-    ml_bin = args.markdownlint
-    ss_bin = args.skill_scanner
-
-    if not args.no_install:
-        if not which(sc_bin):
-            p = ensure_python_tool("skillcheck")
-            if p:
-                sc_bin = p
-
-        if not which(ss_bin):
-            p = ensure_python_tool("cisco-ai-skill-scanner")
-            # cisco-ai-skill-scanner installs as 'skill-scanner'
-            p2 = which("skill-scanner")
-            if p2:
-                ss_bin = p2
-            elif p:
-                ss_bin = p
-
-        ml_full = os.path.join(args.node_bin, ml_bin) if args.node_bin else ml_bin
-        if not which(ml_full):
-            p = ensure_node_tool("markdownlint-cli2", args.node_bin)
-            if p:
-                ml_bin = p
-
-    return sc_bin, ml_bin, ss_bin
+def ensure_tools(no_install=False):
+    """Auto-install missing tools. Skip if --no-install."""
+    if no_install:
+        return
+    # skillcheck + skill-scanner (pip)
+    for pkg, cli in [("skillcheck", "skillcheck"), ("cisco-ai-skill-scanner", "skill-scanner")]:
+        if not shutil.which(cli):
+            print(f"  Auto-installing {pkg} ...", flush=True)
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", pkg], check=False)
+    # markdownlint-cli2 (npm)
+    if not shutil.which("markdownlint-cli2"):
+        print("  Auto-installing markdownlint-cli2 ...", flush=True)
+        subprocess.run(["npm", "install", "-g", "markdownlint-cli2"], check=False)
 
 # ── Discover skills ──
 
@@ -100,17 +56,14 @@ def discover_skills(target: Path):
 
 # ── Run checks ──
 
-def run_cmd(cmd, timeout=60):
-    """Run command with hard timeout via shell `timeout` to guarantee process kill."""
-    # Wrap with shell timeout command for reliable process termination
-    shell_cmd = f"timeout --signal=KILL {timeout} " + " ".join(shlex.quote(c) for c in cmd)
+def run_cmd(cmd, timeout=120):
+    """Run command with shell timeout wrapper to handle stubborn child processes (skill-scanner)."""
     try:
-        r = subprocess.run(shell_cmd, shell=True, capture_output=True, text=True, timeout=timeout + 5)
+        shell_cmd = f"timeout --signal=KILL {timeout} " + " ".join(shlex.quote(c) for c in cmd)
+        r = subprocess.run(shell_cmd, shell=True, capture_output=True, text=True)
         return r.stdout + r.stderr, r.returncode
     except FileNotFoundError:
         return f"ERROR: command not found: {cmd[0]}", 127
-    except subprocess.TimeoutExpired:
-        return "ERROR: timeout", 1
 
 def run_skillcheck(target: Path, skillcheck_bin: str):
     """Run skillcheck on target, return parsed results."""
@@ -135,9 +88,9 @@ def run_markdownlint(target: Path, markdownlint_bin: str, node_bin: str):
     """Run markdownlint-cli2 on target, return raw output."""
     config = target / ".markdownlint.json"
     ml = os.path.join(node_bin, markdownlint_bin) if node_bin else markdownlint_bin
-    # Use absolute glob so it only scans under target
-    md_glob = str(target / "**" / "*.md")
-    cmd = [ml, md_glob, "--config", str(config)] if config.exists() else [ml, md_glob]
+    # Use absolute glob to avoid scanning parent dir
+    glob_pattern = str(target / "**" / "*.md")
+    cmd = [ml, glob_pattern, "--config", str(config)] if config.exists() else [ml, glob_pattern]
     out, rc = run_cmd(cmd, timeout=60)
     return out, rc
 
@@ -145,6 +98,8 @@ def run_skill_scanner(skill_dir: Path, scanner_bin: str):
     """Run skill-scanner scan on a single skill dir, return parsed JSON."""
     cmd = [scanner_bin, "scan", str(skill_dir), "--format", "json"]
     out, rc = run_cmd(cmd, timeout=15)
+    if "Killed" in out or rc == 137:
+        return {"raw_text": "TIMEOUT (killed by timeout wrapper)", "parse_error": True}
     try:
         data = json.loads(out)
         return data
@@ -157,6 +112,7 @@ def parse_markdownlint(raw: str):
     """Parse markdownlint-cli2 text output into structured list."""
     issues = []
     # pattern: filepath:line:col MDxxx/rule-name Description
+    # Use (.*) not (.+) for description — some messages are empty or truncated
     pat = re.compile(r'^(.+?):(\d+):?(\d+)?\s+(MD\d+/\S+)\s+(.*)$', re.MULTILINE)
     for m in pat.finditer(raw):
         issues.append({
@@ -175,6 +131,7 @@ FIX_STRATEGIES = {
     "description.quality-score": "Start description with action verb (Generates/Analyzes/Validates); add trigger context like 'Use this skill whenever...'",
     "disclosure.metadata-budget": "Move non-essential frontmatter fields to the body section to reduce token count below 100",
     "disclosure.body-bloat": "Move large tables (>20 rows) to a referenced file under references/ directory",
+    "frontmatter.field.unknown": "Add field to skillcheck.toml extension_fields, or remove from frontmatter",
     "compat.unverified": "Document field behavior for codex/cursor or remove unverified fields from frontmatter",
     # markdownlint
     "MD013": "Break long lines; or disable for code blocks/tables in .markdownlint.json: MD013: {code_blocks: false, tables: false}",
@@ -188,13 +145,15 @@ FIX_STRATEGIES = {
     "credential_leak": "Replace hardcoded secrets with environment variable references (${VAR}); add to .secrets.baseline if false positive",
     "dangerous_function": "Wrap eval()/exec() calls with input validation; consider safer alternatives like ast.literal_eval()",
     "prompt_injection": "Review and sanitize user-controllable input before embedding in prompts; use structured input templates",
+    # 华为云规范
+    "frontmatter": "检查 SKILL.md YAML frontmatter 格式：必需字段(name/description/tags/version)、类型正确、name与目录名一致",
+    "section": "按华为云规范补充正文章节：概述、前置条件、核心命令、参数确认、参考文档为必需章节",
+    "size": "SKILL.md 建议在500行内，技能目录总大小建议在5MB内，超限时拆分内容到 references/ 子目录",
 }
 
 def get_fix_strategy(rule_or_category: str) -> str:
-    # Try exact match first
     if rule_or_category in FIX_STRATEGIES:
         return FIX_STRATEGIES[rule_or_category]
-    # Try prefix match (e.g. MD013/line-length → MD013)
     prefix = rule_or_category.split("/")[0].split("_")[0]
     for key in FIX_STRATEGIES:
         if key.lower() == prefix.lower():
@@ -203,7 +162,7 @@ def get_fix_strategy(rule_or_category: str) -> str:
 
 # ── Build report ──
 
-def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, scanner_results):
+def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, scanner_results, hwcloud_results=None):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     L = []
     def a(s=""): L.append(s)
@@ -224,23 +183,23 @@ def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, 
     a()
 
     # ── Collect all issues by severity ──
-    critical_issues = []  # (skill_name, issue_dict)
+    critical_issues = []
     error_issues = []
     warning_issues = []
-    info_issues = []
+    # NOTE: info_issues collected but NOT written to report per user requirement
 
-    # skillcheck issues (skip INFO)
+    # skillcheck issues
     sc_pass = True
     if sc_data and not sc_data.get("parse_error"):
         for r in sc_data.get("results", []):
             skill_name = Path(r["path"]).parent.name if "/" in r["path"] else r["path"]
             for d in r.get("diagnostics", []):
                 sev = d.get("severity", "info")
-                if sev == "info":
-                    continue  # skip INFO
                 issue = {"skill": skill_name, "source": "skillcheck", "rule": d["rule"], "severity": sev, "message": d["message"]}
                 if sev == "warning":
                     warning_issues.append(issue)
+                elif sev == "info":
+                    pass  # skip INFO
                 else:
                     error_issues.append(issue)
         if sc_data.get("files_failed", 0) > 0:
@@ -261,21 +220,32 @@ def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, 
         if not sr.get("is_safe", True):
             scanner_pass = False
         for f in sr.get("findings", []):
+            sev_raw = f.get("severity", "CRITICAL").lower()
             issue = {"skill": skill_name, "source": "skill-scanner", "rule": f.get("rule_id", ""),
-                     "severity": f.get("severity", "CRITICAL").lower(), "category": f.get("category", ""),
+                     "severity": sev_raw, "category": f.get("category", ""),
                      "message": f.get("description", ""), "line": f.get("line_number", 0),
                      "snippet": f.get("snippet", ""), "remediation": f.get("remediation", "")}
-            sev = issue["severity"]
-            if sev == "info":
-                continue  # skip INFO
-            if sev == "critical":
+            if sev_raw == "critical":
                 critical_issues.append(issue)
-            elif sev == "high":
+            elif sev_raw == "high":
                 error_issues.append(issue)
-            elif sev == "medium":
+            elif sev_raw == "medium":
                 warning_issues.append(issue)
-            else:
-                info_issues.append(issue)
+            # skip low/info
+
+    # 华为云规范检查 issues
+    hwcloud_pass = True
+    if hwcloud_results:
+        for hr in hwcloud_results:
+            for iss in hr.get("issues", []):
+                sev = iss.get("severity", "warning")
+                issue = {**iss, "source": "hwcloud-spec", "rule_prefix": iss.get("rule", "").split(".")[0]}
+                if sev == "error":
+                    error_issues.append(issue)
+                    hwcloud_pass = False
+                elif sev == "warning":
+                    warning_issues.append(issue)
+                # skip info
 
     # ── Section 2: Issue Summary ──
     a("── 2. Issue Summary ──")
@@ -302,14 +272,7 @@ def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, 
             rules[r] = rules.get(r, 0) + 1
         detail = ", ".join(f"{k} x{v}" for k, v in sorted(rules.items()))
         a(f"  WARNING  {len(warning_issues):>3}  {detail} (skillcheck)")
-    if info_issues:
-        rules = {}
-        for i in info_issues:
-            r = i["rule"].split(".")[0] + "." + i["rule"].split(".")[1] if "." in i["rule"] else i["rule"]
-            rules[r] = rules.get(r, 0) + 1
-        detail = ", ".join(f"{k} x{v}" for k, v in sorted(rules.items()))
-        a(f"  INFO     {len(info_issues):>3}  {detail} (skillcheck)")
-    if not critical_issues and not error_issues and not warning_issues and not info_issues:
+    if not critical_issues and not error_issues and not warning_issues:
         a("  (no issues found)")
     a()
 
@@ -335,14 +298,13 @@ def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, 
     detail_block(critical_issues, "CRITICAL")
     detail_block(error_issues, "ERROR")
     detail_block(warning_issues, "WARNING")
-    detail_block(info_issues, "INFO")
 
     # ── Section 4: Fix Strategies ──
     a("── 4. Fix Strategies ──")
     a()
 
     seen_rules = set()
-    all_issues = critical_issues + error_issues + warning_issues + info_issues
+    all_issues = critical_issues + error_issues + warning_issues
     for i in all_issues:
         rule_key = i.get("category") or i.get("rule_prefix") or i["rule"]
         if rule_key in seen_rules:
@@ -360,16 +322,19 @@ def build_report(target: Path, skills: list, sc_data, md_raw, md_rc, md_issues, 
 
     # ── Verdict ──
     a("=" * 72)
-    pass_count = sum([1 for x in [sc_pass, md_pass, scanner_pass] if x])
-    fail_count = 3 - pass_count
-    if pass_count == 3:
-        a("  Gate Verdict: 🎉 PASS  |  skillcheck ✅  markdownlint ✅  skill-scanner ✅")
+    checks = [
+        ("skillcheck", sc_pass),
+        ("markdownlint", md_pass),
+        ("skill-scanner", scanner_pass),
+        ("hwcloud-spec", hwcloud_pass if hwcloud_results is not None else True),
+    ]
+    pass_count = sum(1 for _, v in checks if v)
+    total = len(checks)
+    if pass_count == total:
+        a(f"  Gate Verdict: PASS  |  {'  '.join(f'{n} OK' for n, _ in checks)}")
     else:
-        parts = []
-        parts.append("skillcheck ✅" if sc_pass else "skillcheck ❌")
-        parts.append("markdownlint ✅" if md_pass else "markdownlint ❌")
-        parts.append("skill-scanner ✅" if scanner_pass else "skill-scanner ❌")
-        a(f"  Gate Verdict: 🚫 FAIL  |  {'  '.join(parts)}")
+        parts = [f"{n} OK" if v else f"{n} FAIL" for n, v in checks]
+        a(f"  Gate Verdict: FAIL  |  {'  '.join(parts)}")
     a("=" * 72)
 
     return "\n".join(L)
@@ -383,78 +348,53 @@ def main():
         print(f"ERROR: target not found: {target}", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-install tools
+    ensure_tools(no_install=args.no_install)
+
     skills = discover_skills(target)
     if not skills:
         print(f"ERROR: no skills found under: {target}", file=sys.stderr)
         sys.exit(1)
 
-    # Determine output dir: parent of target
     output_dir = Path(args.output_dir).resolve() if args.output_dir else target.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Auto-install missing tools
-    sc_bin, ml_bin, ss_bin = ensure_tools(args)
-
     print(f"Scanning {len(skills)} skill(s) under {target} ...")
-    print()
 
     # 1. skillcheck
-    print("  ┌─ [1/3] skillcheck — SKILL.md 规范校验 ─────────────────────────")
-    sc_data = run_skillcheck(target, sc_bin)
-    if sc_data and not sc_data.get("parse_error"):
-        for r in sc_data.get("results", []):
-            name = Path(r["path"]).parent.name if "/" in r["path"] else r["path"]
-            valid = r.get("valid", True)
-            diags = r.get("diagnostics", [])
-            warns = [d for d in diags if d.get("severity") == "warning"]
-            infos = [d for d in diags if d.get("severity") == "info"]
-            icon = "✔" if valid else "✘"
-            extra = ""
-            if warns:
-                extra += f"  ⚠{len(warns)}warn"
-            if infos:
-                extra += f"  ℹ{len(infos)}info"
-            print(f"  │  {icon} {name}{extra}")
-    print("  └───────────────────────────────────────────────────────────────")
-    print()
+    print("  [1/4] skillcheck ...", end=" ", flush=True)
+    sc_data = run_skillcheck(target, args.skillcheck)
+    print("done")
 
     # 2. markdownlint-cli2
-    print("  ┌─ [2/3] markdownlint-cli2 — Markdown 格式检查 ──────────────────")
-    md_raw, md_rc = run_markdownlint(target, ml_bin, args.node_bin)
+    print("  [2/4] markdownlint-cli2 ...", end=" ", flush=True)
+    md_raw, md_rc = run_markdownlint(target, args.markdownlint, args.node_bin)
     md_issues = parse_markdownlint(md_raw)
-    # group by file
-    from collections import Counter
-    file_counts = Counter(i["file"] for i in md_issues)
-    for f, cnt in sorted(file_counts.items()):
-        short = f.replace(str(target) + "/", "").replace(str(target), ".")
-        print(f"  │  ✘ {short}  ({cnt} issues)")
-    if not md_issues:
-        print(f"  │  ✔ 全部通过")
-    print(f"  └───────────────────────────────────────────────────────────────")
-    print(f"  共 {len(md_issues)} 个格式错误")
-    print()
+    print(f"done ({len(md_issues)} issues)")
 
     # 3. skill-scanner (per skill)
-    print("  ┌─ [3/3] skill-scanner — 安全扫描 ───────────────────────────────")
+    print("  [3/4] skill-scanner ...", flush=True)
     scanner_results = []
     for s in skills:
-        sr = run_skill_scanner(s, ss_bin)
+        print(f"    scanning {s.name} ...", end=" ", flush=True)
+        sr = run_skill_scanner(s, args.skill_scanner)
         sr["skill_name"] = s.name
-        scanner_results.append(sr)
         safe = sr.get("is_safe", True)
-        findings = sr.get("findings_count", 0)
-        if safe:
-            print(f"  │  ✔ {s.name}  (安全)")
-        else:
-            sev = sr.get("max_severity", "UNKNOWN")
-            print(f"  │  ✘ {s.name}  ({findings} findings, {sev})")
-            for f in sr.get("findings", []):
-                print(f"  │     L{f.get('line_number','?')} [{f.get('severity','')}] {f.get('category','')}: {f.get('snippet','')[:60]}")
-    print("  └───────────────────────────────────────────────────────────────")
-    print()
+        print("safe" if safe else "ISSUES FOUND")
+        scanner_results.append(sr)
+
+    # 4. 华为云 SKILL.md 规范检查 (per skill)
+    print("  [4/4] 华为云规范检查 ...", flush=True)
+    hwcloud_results = []
+    for s in skills:
+        print(f"    checking {s.name} ...", end=" ", flush=True)
+        hr = run_hwcloud_spec_check(s)
+        issue_count = len(hr.get("issues", []))
+        print(f"{'OK' if issue_count == 0 else f'{issue_count} issues'}")
+        hwcloud_results.append(hr)
 
     # Build report
-    report = build_report(target, skills, sc_data, md_raw, md_rc, md_issues, scanner_results)
+    report = build_report(target, skills, sc_data, md_raw, md_rc, md_issues, scanner_results, hwcloud_results)
 
     # Write report
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
