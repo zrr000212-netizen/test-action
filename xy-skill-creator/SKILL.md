@@ -1,6 +1,7 @@
 ---
 name: xy-skill-creator
 description: "Use when用户要求创建新技能、优化现有技能、或建立可复用工作流为技能。由Hermes与OpenClaw协同开发，适用于所有Agent平台。触发场景：用户说"把这个做成技能"、"写个XX技能"、"帮我建一个做XX的技能"、或要求优化/改进现有技能。Also use when helping multiple agents collaborate to author a shared skill."
+tags: [skill, creator, agent]
 version: 1.0.0
 author: Hermes (毅马仕) + OpenClaw (胖胖虾) for 胖教练
 license: MIT

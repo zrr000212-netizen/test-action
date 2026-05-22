@@ -1,6 +1,8 @@
 ---
 name: gitcode-cli
 description: Use when managing GitCode repositories from the terminal with oh-gc CLI — auth, issues, PRs, reviewers, testers, labels, releases, and repo config. Triggers on oh-gc commands, GitCode issue/PR management, or when user wants to interact with GitCode without a browser.
+tags: [gitcode, cli, devops]
+version: 1.0.0
 ---
 
 # oh-gc CLI — GitCode Command Line Tool

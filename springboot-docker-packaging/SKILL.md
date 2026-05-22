@@ -1,6 +1,7 @@
 ---
 name: springboot-docker-packaging
 description: "Spring Boot 后端 Docker 镜像构建与打包全流程 — 覆盖本地构建、跨架构构建(aarch64→amd64)、SWR推送、CCE部署、tar.gz出包+OBS上传"
+tags: [springboot, docker, packaging]
 version: 1.0.0
 author: Hermes Agent
 license: MIT

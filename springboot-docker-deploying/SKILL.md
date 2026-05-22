@@ -5,6 +5,7 @@ description: >
   触发：用户说"打包部署"、"构建并部署"、"打包上传swr更新cce"等。
   前置技能：springboot-docker-packaging（跨架构构建细节）。
   不适用于：前端项目、非Spring Boot项目、非华为云CCE环境。
+tags: [springboot, docker, cce]
 version: 1.0.0
 author: Hermes Agent
 license: MIT

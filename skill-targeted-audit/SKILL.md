@@ -1,6 +1,7 @@
 ---
 name: skill-targeted-audit
 description: Audit a single skill or skill folder for quality, security, and compliance — generate a detailed report with fix strategies
+tags: [audit, quality, lint]
 version: 1.1.0
 category: devops
 author: Hermes Agent
