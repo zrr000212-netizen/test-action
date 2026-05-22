@@ -31,17 +31,21 @@ SECTION_STRUCTURE = [
 
 # 章节匹配别名（支持中英文混合标题）
 SECTION_ALIASES = {
-    "概述": ["概述", "Overview", "overview"],
-    "前置条件": ["前置条件", "Prerequisites", "prerequisites", "前提条件"],
+    "概述": ["概述", "Overview", "overview", "Introduction", "简介", "核心定位", "适用场景"],
+    "前置条件": ["前置条件", "Prerequisites", "prerequisites", "前提条件", "Requirements", "Setup", "安装配置", "安装"],
     "KooCLI命令格式标准": ["KooCLI命令格式", "KooCLI", "命令格式标准", "CLI命令格式"],
     "场景路由": ["场景路由", "工作流", "Scenario", "Workflow", "场景"],
-    "核心命令": ["核心命令", "Core Commands", "核心操作", "命令"],
-    "参数确认": ["参数确认", "Parameters", "参数配置", "参数"],
-    "输出格式": ["输出格式", "Output Format", "输出"],
-    "验证方法": ["验证方法", "Verification", "验证"],
+    "核心命令": ["核心命令", "Core Commands", "核心操作", "命令", "Usage", "使用方法", "How to Use",
+               "Command Reference", "命令速查", "常用命令", "Commands", "IMAP Commands",
+               "SMTP Commands", "执行流程", "完整执行流程"],
+    "参数确认": ["参数确认", "Parameters", "参数配置", "参数", "Configuration", "配置",
+               "项目参数", "Global Flags", "环境变量", "Environment Variables", "配置说明"],
+    "输出格式": ["输出格式", "Output Format", "输出", "Output Formats"],
+    "验证方法": ["验证方法", "Verification", "验证", "Verification Checklist"],
     "最佳实践": ["最佳实践", "Best Practices", "Best Practice"],
-    "参考文档": ["参考文档", "References", "参考", "Reference"],
-    "注意事项": ["注意事项", "Notes", "Caveats", "注意", "Pitfalls"],
+    "参考文档": ["参考文档", "References", "参考", "Reference", "See Also", "Related",
+               "延伸阅读", "Related Skills", "Fix strategies", "Troubleshooting"],
+    "注意事项": ["注意事项", "Notes", "Caveats", "注意", "Pitfalls", "Gotchas", "常见问题"],
 }
 
 # ── 文件大小限制 ──
