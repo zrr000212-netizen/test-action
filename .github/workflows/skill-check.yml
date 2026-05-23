@@ -1,0 +1,163 @@
+# huaweicloud-skills 门禁检查
+# 触发：push to master / PR to master / 手动触发
+# 检查层：skillcheck规范 → markdownlint格式 → PR标题规范 → Skill安全扫描 → Gitleaks凭证扫描
+name: Skill Check
+
+on:
+  pull_request:
+    branches: [master,dev]
+  push:
+    branches: [master,dev]
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: "Strict mode (warnings as errors)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: skill-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════
+  #  Job 1: skillcheck — SKILL.md agentskills.io 规范检查
+  # ═══════════════════════════════════════════════════════
+  skillcheck:
+    name: 📋 SKILL.md 规范检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install skillcheck
+        run: pip install skillcheck
+
+      - name: Run skillcheck
+        run: |
+          echo "══════════════════════════════════════════════"
+          echo "  skillcheck: SKILL.md agentskills.io 规范检查"
+          echo "══════════════════════════════════════════════"
+          skillcheck "**/SKILL.md" 2>&1 | tee skillcheck.log
+
+      - name: Upload skillcheck log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: skillcheck-log
+          path: skillcheck.log
+
+  # ═══════════════════════════════════════════════════════
+  #  Job 2: markdownlint-cli2 — Markdown 格式检查
+  # ═══════════════════════════════════════════════════════
+  markdown-lint:
+    name: 📝 Markdown 格式检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .markdownlint.json
+        run: |
+          cat > .markdownlint.json << 'EOF'
+          {
+            "default": true,
+            "MD013": false,
+            "MD024": {
+              "allow_different_nesting": true
+            },
+            "MD007": {
+              "indent": 4
+            }
+          }
+          EOF
+
+      - name: Markdownlint CLI2
+        uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: |
+            **/*.md
+          config: .markdownlint.json
+
+  # ═══════════════════════════════════════════════════════
+  #  Job 3: PR 标题规范 — Conventional Commits
+  # ═══════════════════════════════════════════════════════
+  pr-title-check:
+    name: 🏷️ PR 标题规范检查
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+
+  # ═══════════════════════════════════════════════════════
+  #  Job 4: Skill 安全扫描 — cisco-ai-skill-scanner
+  # ═══════════════════════════════════════════════════════
+  skill-security:
+    name: 🔒 Skill 安全扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cisco-ai-skill-scanner
+        run: pip install uv && uv pip install --system cisco-ai-skill-scanner
+
+      - name: Run skill-scanner
+        run: |
+          echo "══════════════════════════════════════════════"
+          echo "  skill-scanner: AI Skill 安全扫描"
+          echo "══════════════════════════════════════════════"
+          skill-scanner scan . 2>&1 | tee skill-scanner.log
+
+      - name: Upload skill-scanner log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: skill-scanner-log
+          path: skill-scanner.log
+
+  # ═══════════════════════════════════════════════════════
+  #  Job 5: Gitleaks — 凭证泄露扫描
+  # ═══════════════════════════════════════════════════════
+  gitleaks:
+    name: 🔑 Gitleaks 凭证扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --no-git --verbose
