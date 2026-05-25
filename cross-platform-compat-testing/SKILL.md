@@ -30,8 +30,7 @@ metadata:
 | 维度 | 默认值 | 说明 |
 |------|--------|------|
 | 浏览器 | Chrome, Firefox | IE需手工(Playwright/Linux不支持) |
-| 分辨率 | 1920×1080, 1366×768, 1280×768, 1536×864 | 必须覆盖边界值 |
-| 大屏 | 2560×1440, 3000×2000 | 可选，覆盖2K/3K |
+|| 分辨率 | 1920×1080, 1366×768, 1280×768, 1536×864 | 必须覆盖边界值 |
 
 **移动端矩阵**:
 | 维度 | 默认值 | 说明 |
@@ -61,7 +60,7 @@ metadata:
 ```python
 from playwright.sync_api import sync_playwright
 
-RESOLUTIONS = [(2560,1440), (3000,2000), (1920,1080), (1366,768), (1280,768), (1536,864)]
+RESOLUTIONS = [(1920,1080), (1366,768), (1280,768), (1536,864)]
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)  # 或 p.firefox.launch()
