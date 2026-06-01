@@ -18,7 +18,7 @@ Scan a single skill directory or a folder of skills, run three quality gates, an
 1. **skillcheck** — SKILL.md agentskills.io spec validation (pip install skillcheck)
 2. **markdownlint-cli2** — Markdown style consistency (npm install -g markdownlint-cli2)
 3. **cisco-ai-skill-scanner** — Security scanning: command injection, reverse shell, credential leak, dangerous functions (pip install cisco-ai-skill-scanner, CLI: `skill-scanner`)
-4. **hwcloud-spec** — 华为云 SKILL.md 规范检查: frontmatter 必需字段(name/description/tags/version)、正文章节结构(概述/前置条件/核心命令/参数确认/参考文档)、文件大小(SKILL.md≤500行, 目录≤5MB)
+4. **hwcloud-spec** — 华为云 SKILL.md 规范检查: frontmatter 必需字段(name/description/tags)、推荐字段(version)、正文章节结构(概述/前置条件/核心命令/参数确认/参考文档)、文件大小(SKILL.md≤500行, 目录≤5MB)
 5. **gitleaks** — 凭证泄露扫描: 检测硬编码API密钥、密码、私钥、token等800+种凭证格式 (https://github.com/gitleaks/gitleaks)
 
 ## When to Use
@@ -97,7 +97,7 @@ Five sections:
 
 | Rule | Fix |
 |------|-----|
-| frontmatter.missing.{field} | 补充必需字段: name(与目录名一致), description(含功能概要+触发词), tags(≤5个), version(语义化如1.0.0) |
+| frontmatter.missing.{field} | 补充必需字段: name(与目录名一致), description(含功能概要+触发词), tags(≤5个)；推荐字段: version(语义化如1.0.0，缺失仅warning) |
 | frontmatter.name-mismatch | name 字段值必须与技能目录名完全一致 |
 | frontmatter.tags-too-many | 标签数超过5个，精简到5个以内 |
 | frontmatter.version-format | version 需符合语义化版本号格式 (如 2.0.0) |

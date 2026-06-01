@@ -10,6 +10,10 @@ REQUIRED_FIELDS = {
     "name": {"type": "string", "desc": "技能唯一标识，与目录名一致"},
     "description": {"type": "string", "desc": "技能描述，包含功能概要和触发词"},
     "tags": {"type": "list", "desc": "标签列表，用于搜索和分类，不大于5个"},
+}
+
+# ── Frontmatter 推荐字段定义（缺失仅 warning，不阻塞） ──
+RECOMMENDED_FIELDS = {
     "version": {"type": "string", "desc": "语义化版本号"},
 }
 
@@ -173,6 +177,28 @@ def check_frontmatter(skill_dir: Path, meta: dict, parse_error: bool) -> list:
                     "severity": "error", "category": f"frontmatter.type.{field}",
                     "message": f"字段 '{field}' 应为字符串类型，当前为列表"
                 })
+
+    # 推荐字段检查（缺失仅 warning）
+    for field, spec in RECOMMENDED_FIELDS.items():
+        if field not in meta:
+            issues.append({
+                "skill": skill_name, "source": "hwcloud-spec",
+                "rule": f"frontmatter.missing.{field}",
+                "severity": "warning", "category": f"frontmatter.missing.{field}",
+                "message": f"缺少推荐字段 '{field}'（{spec['desc']}）"
+            })
+            continue
+
+        value = meta[field]
+
+        # 类型检查
+        if spec["type"] == "string" and isinstance(value, list):
+            issues.append({
+                "skill": skill_name, "source": "hwcloud-spec",
+                "rule": f"frontmatter.type.{field}",
+                "severity": "warning", "category": f"frontmatter.type.{field}",
+                "message": f"字段 '{field}' 应为字符串类型，当前为列表"
+            })
 
     # name 与目录名一致性
     if "name" in meta and meta["name"] != skill_name:
